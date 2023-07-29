@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 # to get a string like this run:
 # openssl rand -hex 32
-SECRET_KEY = "56d61524a9e0d7190cdfc765eaf1e0b35b6395e9c74cc294644fffce92d96ca1"
+SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 
@@ -22,11 +22,11 @@ fake_users_db = {
         "email": "johndoe@example.com",
         "account_number": 1234567890,
         "balance": 1000,
-        "hashed_password": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
+        "hashed_password": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",  # password: secret
         "disabled": False,
     },
     "janedoe": {
-        "id": 1,
+        "id": 2,
         "username": "janedoe",
         "full_name": "Jane Doe",
         "email": "jjanedoe@example.com",
@@ -48,6 +48,7 @@ class TokenData(BaseModel):
 
 
 class User(BaseModel):
+    id: int | None = None
     username: str
     email: str | None = None
     full_name: str | None = None
@@ -75,14 +76,14 @@ def get_password_hash(password):
     return pwd_context.hash(password)
 
 
-def get_user(db, username: str):
+def get_user_by_username(db, username: str):
     if username in db:
         user_dict = db[username]
         return UserInDB(**user_dict)
 
 
 def authenticate_user(fake_db, username: str, password: str):
-    user = get_user(fake_db, username)
+    user = get_user_by_username(fake_db, username)
     if not user:
         return False
     if not verify_password(password, user.hashed_password):
@@ -115,7 +116,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
         token_data = TokenData(username=username)
     except JWTError:
         raise credentials_exception
-    user = get_user(fake_users_db, username=token_data.username)
+    user = get_user_by_username(fake_users_db, username=token_data.username)
     if user is None:
         raise credentials_exception
     return user
@@ -159,19 +160,22 @@ async def read_users_me(
 
 
 @app.get("/accounts")
-async def get_accounts():
+async def get_accounts(current_user: Annotated[User, Depends(get_current_user)]):
+    get_current_active_user(current_user)
     return await get_all_users()
 
 
 @app.post("/accounts")
-async def create_account(user: User):
+async def create_account(user: User, current_user: User = Depends(get_current_user)):
+    get_current_active_user(current_user)
     fake_users_db.update({user.username: user.dict()})
     return {"message": "user created successfully", "user": user.dict()}
 
 
-@app.get("/accounts/{account_id}")
-async def get_account(account_id: int):
-    user = get_user(fake_users_db, account_id)
+@app.get("/accounts/{username}")
+async def get_account(username: str, current_user: User = Depends(get_current_user)):
+    get_current_active_user(current_user)
+    user = get_user_by_username(fake_users_db, username)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -180,9 +184,12 @@ async def get_account(account_id: int):
     return user
 
 
-@app.put("/accounts/{account_id}")
-async def update_account(account_id: int, user: User):
-    user = get_user(fake_users_db, account_id)
+@app.put("/accounts/{username}")
+async def update_account(
+    username: str, user: User, current_user: User = Depends(get_current_user)
+):
+    get_current_active_user(current_user)
+    user = get_user_by_username(fake_users_db, username)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -192,9 +199,10 @@ async def update_account(account_id: int, user: User):
     return {"message": "user updated successfully", "user": user.dict()}
 
 
-@app.delete("/accounts/{account_id}")
-async def delete_account(account_id: int):
-    user = get_user(fake_users_db, account_id)
+@app.delete("/accounts/{username}")
+async def delete_account(username: str, current_user: User = Depends(get_current_user)):
+    get_current_active_user(current_user)
+    user = get_user_by_username(fake_users_db, username)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -205,25 +213,32 @@ async def delete_account(account_id: int):
 
 
 @app.post("/transfer")
-async def transfer(to_account: int, from_account: int, amount: int):
-    to_user = get_user(fake_users_db, to_account)
-    from_user = get_user(fake_users_db, from_account)
-    if not to_user or not from_user:
+async def transfer(
+    to_account: str, amount: int, current_user: User = Depends(get_current_user)
+):
+    get_current_active_user(current_user)
+    to_user = get_user_by_username(fake_users_db, to_account)
+    if not to_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
+            detail="Account not found",
         )
-    if from_user.balance < amount:
+    if current_user.balance < amount:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Insufficient funds",
+            detail="Invalid amount. Must be greater than 0 and less than your balance",
         )
+    if amount < 0 or amount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid amount. Must be greater than 0 and less than your balance",
+        )
+
     to_user.balance += amount
-    from_user.balance -= amount
+    current_user.balance -= amount
     fake_users_db.update({to_user.username: to_user.dict()})
-    fake_users_db.update({from_user.username: from_user.dict()})
+    fake_users_db.update({current_user.username: current_user.dict()})
     return {
         "message": "transfer successful",
-        "from_user": from_user.dict(),
-        "to_user": to_user.dict(),
+        "account info": current_user.dict(),
     }
