@@ -1,8 +1,8 @@
 
 from sqlalchemy.orm import Session
 
-import models
-import schemas
+import app.models as models
+import app.schemas as schemas
 import auth
 
 

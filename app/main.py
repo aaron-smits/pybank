@@ -6,8 +6,8 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 
-import models
-import schemas
+import app.models as models
+import app.schemas as schemas
 import crud
 import auth
 from database import SessionLocal, engine
