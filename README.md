@@ -14,4 +14,5 @@ Implementing the gobank api using FastAPI and Python
 - [x] Authentication implementation on all endpoints
 - [x] Implement real DB connection
 - [x] Dockerize the application
-- [ ] Environment variables (dotenv) 
+- [x] Environment variables (dotenv) 
+- [x] docker compose automation to run the app and the db
